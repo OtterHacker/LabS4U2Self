@@ -1,0 +1,9 @@
+- hosts: all
+  gather_facts: True
+  
+  roles:
+    - common
+    - mssql
+
+  vars_files:
+    - ../vars/vars.yml 

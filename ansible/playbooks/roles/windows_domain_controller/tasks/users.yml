@@ -1,0 +1,17 @@
+---
+- name: "Create users"
+  win_domain_user:
+    name: "hpotter"
+    firstname: "Harry"
+    surname: "Potter"
+    password: "password@123"
+    password_never_expires: yes
+    state: present
+    description: "Domain admin to hijack"
+    groups: ["Domain Admins"]
+    domain_username: "Administrator"
+    domain_password: "password@123"
+  register: usercreate
+  until: "usercreate is not failed"
+  retries: 10
+  delay: 30

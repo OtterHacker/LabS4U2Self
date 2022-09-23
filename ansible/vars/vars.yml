@@ -1,0 +1,7 @@
+# Domain Controller
+windows_domain_controller_info:
+  dns_domain_name: lab.local
+  domain_admin_password: password@123
+  domain_admin_user: Administrator@lab.local
+  safe_mode_password: password@123
+  state: domain_controller

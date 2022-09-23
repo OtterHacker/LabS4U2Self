@@ -1,0 +1,176 @@
+
+- name: Set DNS
+  ansible.windows.win_dns_client:
+    adapter_names: '*'
+    dns_servers:
+      - DNSIP
+      - 8.8.8.8
+
+- name: Reboot for DNS
+  win_reboot:
+    msg: "DNS set. Rebooting..."
+    pre_reboot_delay: 15
+    post_reboot_delay: 15
+
+- name: Ensure workstation is domain-joined
+  win_domain_membership:
+    dns_domain_name: "lab.local"
+    domain_admin_user: "hpotter@lab.local"
+    domain_admin_password: "password@123"
+    state: domain
+  register: domain_state
+
+- name: Reboot to join domain
+  win_reboot:
+    reboot_timeout: 600
+
+
+
+
+
+- name: create a directory for installer download
+  win_file: 
+    path: c:\setup
+    state: directory
+
+- name: create a directory for installer extraction
+  win_file: 
+    path: c:\setup\mssql
+    state: directory
+
+- name: create a directory for media extraction
+  win_file: 
+    path: c:\setup\mssql\media
+    state: directory
+
+- name: check downloaded file exists
+  win_stat:
+    path: c:\setup\mssql\sql_installer.exe
+  register: installer_file
+
+- name: create the configuration file
+  win_template: 
+    src: vars/sql_conf.ini
+    dest: c:\setup\mssql\sql_conf.ini
+
+- name: get the installer
+  win_get_url:
+      url: "https://download.microsoft.com/download/7/f/8/7f8a9c43-8c8a-4f7c-9f92-83c18d96b681/SQL2019-SSEI-Expr.exe"
+      dest: 'c:\setup\mssql\sql_installer.exe'
+  when: not installer_file.stat.exists
+
+- name: check install already done
+  win_stat:
+    path: "C:\\Program Files\\Microsoft SQL Server\\MSSQL15.SQLEXPRESS"
+  register: mssql_install_already_done
+
+# Install the database with a domain admin user
+- name: Install the database
+  win_command: c:\setup\mssql\sql_installer.exe /IACCEPTSQLSERVERLICENSETERMS /configurationfile=c:\setup\mssql\sql_conf.ini /MEDIAPATH=c:\setup\mssql\media /QUIET /HIDEPROGRESSBAR
+  args:
+    chdir: c:\setup
+  vars:
+    ansible_become: yes
+    ansible_become_method: runas
+    ansible_become_user: "Administrator"
+    ansible_become_password: "password@123"
+    ansible_become_flags: logon_type=new_credentials logon_flags=netcredentials_only
+  register: mssqlinstall
+  until: "mssqlinstall is not failed"
+  retries: 3
+  delay: 120
+  when: not mssql_install_already_done.stat.exists
+
+- name: Add or update registry for ip port
+  win_regedit:
+    path: 'HKLM:\Software\Microsoft\Microsoft SQL Server\MSSQL15.SQLEXPRESS\MSSQLServer\SuperSocketNetLib\Tcp\IPAll'
+    name: TcpPort
+    data: 1433
+  register: win_reg
+
+# - name: Add or update registry for named pipe
+#   win_regedit:
+#     path: 'HKLM:\Software\Microsoft\Microsoft SQL Server\MSSQL15.SQLEXPRESS\MSSQLServer\SuperSocketNetLib\Np'
+#     name: Enabled
+#     data: 0x00000001
+#     type: dword
+#   register: win_reg
+
+- name: Restart a service
+  win_service:
+    name: 'MSSQL$SQLEXPRESS'
+    force_dependent_services: yes
+    state: restarted
+  when: win_reg.changed
+
+- name: check SQL Server Manager Studio installer exists
+  win_stat:
+    path: c:\setup\mssql\SSMS_installer.exe
+  register: ssms_installer_file
+
+- name: get the installer
+  win_get_url:
+      url: 'https://aka.ms/ssmsfullsetup'
+      dest: 'c:\setup\mssql\SSMS_installer.exe'
+  when: not ssms_installer_file.stat.exists
+
+- name: check SSMS installation already done
+  win_stat:
+    path: "C:\\Program Files (x86)\\Microsoft SQL Server Management Studio 18"
+  register: ssms_installation
+
+- name: Install SSMS
+  win_command: c:\setup\mssql\SSMS_installer.exe /install /quiet /norestart
+  register: install_ssmss
+  when: not ssms_installation.stat.exists
+
+- name: Reboot after install
+  win_reboot:
+    reboot_timeout: 600
+  when: not ssms_installation.stat.exists
+
+- name: Enable sa account
+  win_shell: |
+    SqlCmd -E -Q "ALTER LOGIN sa ENABLE"
+    SqlCmd -E -Q "ALTER LOGIN sa WITH PASSWORD = 'password123' , CHECK_POLICY=OFF"
+  become: yes
+  become_method: runas
+  become_user: "Administrator"
+  vars:
+    ansible_become_pass: "password@123"
+
+- name: enable MSSQL authentication and windows authent
+  win_shell: |
+    SqlCmd -E -Q "EXEC xp_instance_regwrite N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'LoginMode', REG_DWORD, 2"
+  become: yes
+  become_method: runas
+  become_user: "Administrator"
+  vars:
+    ansible_become_pass: "password@123"
+
+- name: Restart service
+  win_service:
+    name: 'MSSQL$SQLEXPRESS'
+    force_dependent_services: yes
+    state: restarted
+
+
+- name: Firewall rule to allow SMTP on TCP port 25
+  win_firewall_rule:
+    name: MSSQL
+    localport: 1433
+    action: allow
+    direction: in
+    protocol: tcp
+    state: present
+    enabled: yes
+
+- name: Firewall rule to allow SMTP on TCP port 25
+  win_firewall_rule:
+    name: MSSQL UDP-In
+    localport: 1434
+    action: allow
+    direction: in
+    protocol: tcp
+    state: present
+    enabled: yes

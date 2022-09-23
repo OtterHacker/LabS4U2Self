@@ -1,0 +1,9 @@
+[win]
+PUBLICIP
+
+[win:vars]
+ansible_connection=winrm
+ansible_user=Administrator
+ansible_password=password@123
+ansible_winrm_transport=basic
+ansible_winrm_server_cert_validation=ignore
